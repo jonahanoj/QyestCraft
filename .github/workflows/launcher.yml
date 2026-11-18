@@ -88,8 +88,11 @@ jobs:
 
       - name: Build APK
         env:
-          OAUTH_API_KEY: ${{ secrets.MICROSOFT_CLIENT_ID }}
+          MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
         run: |
+          # Until our own Mojang-approved ID exists, sign in through QuestCraft's public client ID
+          # (pojlib LoginHelper, same device-code flow). Set the MICROSOFT_CLIENT_ID secret to switch.
+          export OAUTH_API_KEY="${MICROSOFT_CLIENT_ID:-d17a73a2-707c-40f5-8c90-d3eda0956f10}"
           cd fcl
           chmod +x gradlew
           if [ "$SIGNED" != 1 ]; then
