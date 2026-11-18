@@ -13,6 +13,9 @@ env:
   VIVECRAFT_REPO: https://github.com/cff1028/VivecraftMod
   VIVECRAFT_COMMIT: 871c83f   # audited 2026-11-18 against upstream Vivecraft 26.3-1.3.18
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -52,10 +55,21 @@ jobs:
         run: |
           mkdir -p out
           ls -la vc-src/neoforge/build/libs/
-          cp vc-src/neoforge/build/libs/*.jar out/
+          for j in vc-src/neoforge/build/libs/*.jar; do case "$j" in *-sources.jar|*-api*.jar|*-slim.jar) ;; *) cp "$j" out/;; esac; done
           ls -la out
+          for j in out/*.jar; do echo "== $j"; unzip -l "$j" | grep -E "openxr/MCOpenXR|QuestSdl|neoforge.mods.toml|META-INF/jarjar/" ; done
+          sha256sum out/*.jar
 
       - uses: actions/upload-artifact@v4
         with:
           name: vivecraft-26.3-openxr-neoforge
           path: out/*.jar
+
+      - name: Publish as a GitHub release (used by the launcher and the website)
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=vivecraft-26.3-openxr-neoforge
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Vivecraft 26.3 OpenXR (NeoForge, QyestCraft build)" --notes "Built from cff1028/VivecraftMod@${VIVECRAFT_COMMIT} by GitHub Actions." --prerelease
+          gh release upload "$TAG" out/*.jar --clobber
