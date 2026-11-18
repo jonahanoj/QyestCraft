@@ -30,8 +30,8 @@ jobs:
         working-directory: vc-src
         run: |
           # build only NeoForge (the fork builds Fabric only by default)
-          sed -i 's/^project.build.excludeNeoforge=.*//; s/^project.build.excludeFabric=.*//' gradle.properties
-          printf '\nproject.build.excludeNeoforge=false\nproject.build.excludeFabric=true\n' >> gradle.properties
+          # settings.gradle reads these switches from local.properties
+          printf 'project.build.excludeNeoforge=false\nproject.build.excludeFabric=true\n' > local.properties
           sed -i 's/^mod_description=.*/mod_description=Vivecraft with Quest standalone OpenXR support (QyestCraft NeoForge build)./' gradle.properties
           if ls ../vivecraft/patches/*.patch >/dev/null 2>&1; then
             for p in ../vivecraft/patches/*.patch; do echo "applying $p"; git apply --whitespace=nowarn "$p"; done
