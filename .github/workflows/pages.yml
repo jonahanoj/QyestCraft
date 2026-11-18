@@ -7,10 +7,14 @@ on:
   push:
     branches: [main]
     paths: ["mods/**", "pack/**", "site/**", ".github/workflows/pages.yml"]
+  workflow_run:
+    workflows: ["Build QyestCraft launcher (APK)"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
@@ -27,10 +31,18 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build site
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p _site
           if [ -d site ]; then cp -r site/. _site/; fi
           python3 pack/build_pack.py _site "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          # the installer page downloads the APK from this same site (GitHub release downloads block browsers)
+          if gh release download launcher -R "${{ github.repository }}" -p QyestCraft.apk -D _site; then
+            ls -la _site/QyestCraft.apk
+          else
+            echo "::warning::No launcher release yet, the Install button won't work until it exists."
+          fi
           touch _site/.nojekyll
           find _site -type f | sort
       - uses: actions/upload-pages-artifact@v3
