@@ -1,0 +1,61 @@
+name: Vivecraft OpenXR (NeoForge 26.3)
+
+# Builds the NeoForge variant of the Quest/OpenXR Vivecraft port.
+# Source: cff1028/VivecraftMod, pinned to the audited commit below (tag 26.3-1.3.18-OpenXR).
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/vivecraft-neoforge.yml"
+      - "vivecraft/**"
+
+env:
+  VIVECRAFT_REPO: https://github.com/cff1028/VivecraftMod
+  VIVECRAFT_COMMIT: 871c83f   # audited 2026-11-18 against upstream Vivecraft 26.3-1.3.18
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the audited Vivecraft OpenXR source
+        run: |
+          git clone --filter=blob:none "$VIVECRAFT_REPO" vc-src
+          cd vc-src
+          git checkout "$VIVECRAFT_COMMIT"
+          git log -1 --oneline
+
+      - name: Apply QyestCraft patches
+        working-directory: vc-src
+        run: |
+          # build only NeoForge (the fork builds Fabric only by default)
+          sed -i 's/^project.build.excludeNeoforge=.*//; s/^project.build.excludeFabric=.*//' gradle.properties
+          printf '\nproject.build.excludeNeoforge=false\nproject.build.excludeFabric=true\n' >> gradle.properties
+          sed -i 's/^mod_description=.*/mod_description=Vivecraft with Quest standalone OpenXR support (QyestCraft NeoForge build)./' gradle.properties
+          if ls ../vivecraft/patches/*.patch >/dev/null 2>&1; then
+            for p in ../vivecraft/patches/*.patch; do echo "applying $p"; git apply --whitespace=nowarn "$p"; done
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build NeoForge jar
+        working-directory: vc-src
+        run: ./gradlew --no-daemon --stacktrace :neoforge:build -x test
+
+      - name: Collect jar
+        run: |
+          mkdir -p out
+          ls -la vc-src/neoforge/build/libs/
+          cp vc-src/neoforge/build/libs/*.jar out/
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vivecraft-26.3-openxr-neoforge
+          path: out/*.jar
