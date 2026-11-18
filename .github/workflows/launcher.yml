@@ -73,9 +73,11 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.QYESTCRAFT_KEYSTORE_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
-            echo "::error::Add the QYESTCRAFT_KEYSTORE_B64 and QYESTCRAFT_KEYSTORE_PASSWORD repo secrets first."
-            exit 1
+            echo "::warning::No QYESTCRAFT_KEYSTORE_* secrets yet: compile check only, nothing gets published."
+            echo "SIGNED=0" >> "$GITHUB_ENV"
+            exit 0
           fi
+          echo "SIGNED=1" >> "$GITHUB_ENV"
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/qyestcraft.jks"
           {
             echo "QUEST_FCL_KEYSTORE_FILE=$RUNNER_TEMP/qyestcraft.jks"
@@ -90,6 +92,10 @@ jobs:
         run: |
           cd fcl
           chmod +x gradlew
+          if [ "$SIGNED" != 1 ]; then
+            ./gradlew :FCL:assembleFordebug -Darch=arm64 --no-daemon --stacktrace
+            exit 0
+          fi
           ./gradlew :FCL:assembleRelease -Darch=arm64 --no-daemon --stacktrace
           mkdir -p ../out
           cp $(find FCL/build/outputs/apk -name "*.apk" | head -1) ../out/QyestCraft.apk
@@ -97,6 +103,7 @@ jobs:
           sha256sum ../out/QyestCraft.apk | tee ../out/QyestCraft.apk.sha256
 
       - name: Publish release
+        if: env.SIGNED == '1'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
