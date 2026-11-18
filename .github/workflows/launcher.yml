@@ -1,0 +1,105 @@
+name: Build QyestCraft launcher (APK)
+
+# Builds the FCL Quest VR launcher (cff1028/FoldCraftLauncher) with the QyestCraft changes:
+#   - its own app id / name, so it's its own app and never "updates" to someone else's build
+#   - asks to install the Mynecraft pack on first start (then auto-updates mods on every launch)
+#   - signed with OUR key from repo secrets (the fork's committed keys are never used)
+# Publishes the APK as the "launcher" release.
+
+on:
+  push:
+    branches: [main]
+    paths: ["launcher/**", ".github/workflows/launcher.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FCL_REPO: https://github.com/cff1028/FoldCraftLauncher
+  FCL_COMMIT: 9e1d25c
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get FCL Quest VR source (pinned)
+        run: |
+          git clone --filter=blob:none "$FCL_REPO" fcl
+          cd fcl
+          git checkout "$FCL_COMMIT"
+          git submodule update --init --recursive || true
+          # never use keys that the fork committed
+          rm -rf .signing
+          find . -name "*.jks" -o -name "*.keystore" -o -name "*.pepk" | xargs -r rm -v
+
+      - name: Apply QyestCraft changes
+        run: |
+          set -e
+          cd fcl
+          # own app id + name
+          sed -i 's/applicationId = "com.questfcl.launcher"/applicationId = "com.jonahanoj.qyestcraft"/' FCL/build.gradle.kts
+          sed -i 's/"com.questfcl.launcher.provider"/"com.jonahanoj.qyestcraft.provider"/' FCL/build.gradle.kts
+          sed -i 's#>com.questfcl.launcher.provider<#>com.jonahanoj.qyestcraft.provider<#' FCL/src/main/res/values/strings.xml
+          sed -i 's#<string name="app_name" translatable="false">FCL Quest VR</string>#<string name="app_name" translatable="false">QyestCraft</string>#' FCL/src/main/res/values/strings.xml
+          sed -i 's#<string name="app_name_import">FCL Quest VR · Install Modpack</string>#<string name="app_name_import">QyestCraft · Install Modpack</string>#' FCL/src/main/res/values/strings.xml
+          grep -n 'applicationId\|file_browser_provider' FCL/build.gradle.kts
+          grep -n '"app_name"' FCL/src/main/res/values/strings.xml
+          # first-start Mynecraft installer
+          mkdir -p FCL/src/main/java/com/tungsten/fcl/qyestcraft
+          cp ../launcher/src/QyestCraftSetup.java FCL/src/main/java/com/tungsten/fcl/qyestcraft/
+          python3 - <<'EOF'
+          p = "FCL/src/main/java/com/tungsten/fcl/activity/MainActivity.kt"
+          s = open(p).read()
+          anchor = "                uiManager.init()\n"
+          assert s.count(anchor) == 1, "MainActivity anchor not found"
+          s = s.replace(anchor, anchor + "                com.tungsten.fcl.qyestcraft.QyestCraftSetup.offerInstallIfMissing(this@MainActivity)\n")
+          open(p, "w").write(s)
+          EOF
+          for p in ../launcher/patches/*.patch; do [ -e "$p" ] && git apply -v "$p"; done
+          git status --short
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.QYESTCRAFT_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.QYESTCRAFT_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::Add the QYESTCRAFT_KEYSTORE_B64 and QYESTCRAFT_KEYSTORE_PASSWORD repo secrets first."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/qyestcraft.jks"
+          {
+            echo "QUEST_FCL_KEYSTORE_FILE=$RUNNER_TEMP/qyestcraft.jks"
+            echo "QUEST_FCL_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "QUEST_FCL_KEY_ALIAS=qyestcraft"
+            echo "QUEST_FCL_KEY_PASSWORD=$KEYSTORE_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: Build APK
+        env:
+          OAUTH_API_KEY: ${{ secrets.MICROSOFT_CLIENT_ID }}
+        run: |
+          cd fcl
+          chmod +x gradlew
+          ./gradlew :FCL:assembleRelease -Darch=arm64 --no-daemon --stacktrace
+          mkdir -p ../out
+          cp $(find FCL/build/outputs/apk -name "*.apk" | head -1) ../out/QyestCraft.apk
+          ls -la ../out
+          sha256sum ../out/QyestCraft.apk | tee ../out/QyestCraft.apk.sha256
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view launcher >/dev/null 2>&1 || gh release create launcher --prerelease \
+            --title "QyestCraft launcher" --notes "Install with the QyestCraft page (phone + USB cable) or adb install."
+          gh release upload launcher out/QyestCraft.apk out/QyestCraft.apk.sha256 --clobber

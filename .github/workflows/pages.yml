@@ -1,0 +1,48 @@
+name: Publish modpack + install page
+
+# Runs whenever a jar is added/removed in mods/, the pack settings change,
+# or the install page changes. The launcher picks up changes the next time
+# the game is started.
+on:
+  push:
+    branches: [main]
+    paths: ["mods/**", "pack/**", "site/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build site
+        run: |
+          mkdir -p _site
+          if [ -d site ]; then cp -r site/. _site/; fi
+          python3 pack/build_pack.py _site "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          touch _site/.nojekyll
+          find _site -type f | sort
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
